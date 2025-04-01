@@ -4,6 +4,7 @@ use std::{iter, mem};
 mod model;
 mod serialization;
 pub mod trainer;
+pub mod super_trainer;
 mod word;
 
 type Pair = (u32, u32);

@@ -195,7 +195,7 @@ pub struct BpeTrainer {
     /// An optional parameter to limit the max length of any single token
     pub max_token_length: Option<usize>,
 
-    words: HashMap<String, u64>,
+    pub(crate) words: HashMap<String, u64>,
 }
 
 impl Default for BpeTrainer {
