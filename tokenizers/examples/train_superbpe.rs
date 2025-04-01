@@ -4,11 +4,11 @@ use std::path::Path;
 
 use tokenizers::models::bpe::super_trainer::SuperBpeTrainerBuilder;
 use tokenizers::models::bpe::BPE;
-use tokenizers::normalizers::{ByteLevel as ByteLevelNormalizer};
+use tokenizers::normalizers::ByteLevel as ByteLevelNormalizer;
 use tokenizers::pre_tokenizers::digits::Digits;
 use tokenizers::processors::byte_level::ByteLevel as ByteLevelPostProcessor;
-use tokenizers::{AddedToken, DecoderWrapper, NormalizerWrapper, PostProcessorWrapper};
 use tokenizers::TokenizerImpl;
+use tokenizers::{AddedToken, DecoderWrapper, NormalizerWrapper, PostProcessorWrapper};
 
 fn main() {
     let corpus = BufReader::new(
