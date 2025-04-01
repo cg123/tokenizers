@@ -3,6 +3,7 @@
 use super::trainer::BpeTrainer;
 use super::BPE;
 use super::{Pair, WithFirstLastIterator, Word};
+use crate::parallelism::*;
 use crate::tokenizer::{AddedToken, Result, Trainer};
 use crate::utils::progress::{ProgressBar, ProgressStyle};
 use crate::{PreTokenizedString, PreTokenizer};
@@ -603,39 +604,64 @@ impl Trainer for SuperBpeTrainer {
         S: AsRef<str> + Send,
         F: Fn(&str) -> Result<Vec<String>> + Sync,
     {
-        // Process each sequence into two separate word maps
-        let mut words_stage1 = HashMap::new();
-        let mut words_stage2 = HashMap::new();
+        use rayon::prelude::*;
 
+        // Create whitespace pretokenizer
         let ws_pretok = crate::pre_tokenizers::split::Split::new(
             crate::pre_tokenizers::split::SplitPattern::Regex(r"\w+".to_string()),
             crate::SplitDelimiterBehavior::MergedWithPrevious,
             false,
         )?;
 
-        let mut vector = Vec::new();
-        // Process the iterator sequentially
-        for sequence in iterator {
-            vector.push(sequence.as_ref().to_string());
-            for token in process(sequence.as_ref())? {
-                words_stage2
-                    .entry(token.clone())
-                    .and_modify(|count| *count += 1)
-                    .or_insert(1);
-            }
-            let mut pretokenized: PreTokenizedString = sequence.as_ref().into();
-            ws_pretok.pre_tokenize(&mut pretokenized)?;
-            for (word, _, _) in
-                pretokenized.get_splits(crate::OffsetReferential::Original, crate::OffsetType::Byte)
-            {
-                for token in process(word)? {
-                    words_stage1
-                        .entry(token.clone())
-                        .and_modify(|count| *count += 1)
-                        .or_insert(1);
-                }
-            }
-        }
+        // Process the iterator in parallel using map/reduce
+        let (words_stage1, words_stage2): (HashMap<String, u64>, HashMap<String, u64>) = iterator
+            .maybe_par_bridge()
+            .map(
+                |sequence| -> Result<(HashMap<String, u64>, HashMap<String, u64>)> {
+                    let sequence_str = sequence.as_ref();
+
+                    // Process for stage 2 (without whitespace pretokenization)
+                    let stage2_tokens = process(sequence_str)?;
+                    let mut map_stage2 = HashMap::new();
+                    for token in stage2_tokens {
+                        map_stage2.entry(token).and_modify(|c| *c += 1).or_insert(1);
+                    }
+
+                    // Process for stage 1 (with whitespace pretokenization)
+                    let mut pretokenized: PreTokenizedString = sequence_str.into();
+                    ws_pretok.pre_tokenize(&mut pretokenized)?;
+
+                    let mut map_stage1 = HashMap::new();
+                    for (word, _, _) in pretokenized
+                        .get_splits(crate::OffsetReferential::Original, crate::OffsetType::Byte)
+                    {
+                        for token in process(word)? {
+                            map_stage1.entry(token).and_modify(|c| *c += 1).or_insert(1);
+                        }
+                    }
+
+                    Ok((map_stage1, map_stage2))
+                },
+            )
+            .reduce(
+                || Ok((HashMap::new(), HashMap::new())),
+                |acc, cur| {
+                    let (mut acc_stage1, mut acc_stage2) = acc?;
+                    let (cur_stage1, cur_stage2) = cur?;
+
+                    // Merge stage 1 maps
+                    for (k, v) in cur_stage1 {
+                        acc_stage1.entry(k).and_modify(|c| *c += v).or_insert(v);
+                    }
+
+                    // Merge stage 2 maps
+                    for (k, v) in cur_stage2 {
+                        acc_stage2.entry(k).and_modify(|c| *c += v).or_insert(v);
+                    }
+
+                    Ok((acc_stage1, acc_stage2))
+                },
+            )?;
 
         self.words_stage1 = words_stage1;
         self.words_stage2 = words_stage2;

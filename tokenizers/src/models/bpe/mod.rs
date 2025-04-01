@@ -3,8 +3,8 @@ use std::{iter, mem};
 
 mod model;
 mod serialization;
-pub mod trainer;
 pub mod super_trainer;
+pub mod trainer;
 mod word;
 
 type Pair = (u32, u32);
@@ -79,5 +79,6 @@ where
 
 // Re-export
 pub use model::*;
+pub use super_trainer::*;
 pub use trainer::*;
 use word::*;
