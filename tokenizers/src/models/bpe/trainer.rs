@@ -45,6 +45,7 @@ struct Config {
     continuing_subword_prefix: Option<String>,
     end_of_word_suffix: Option<String>,
     max_token_length: Option<usize>,
+    initial_tokens: Vec<String>,
 }
 
 /// A `BpeTrainerBuilder` can be used to create a `BpeTrainer` with a custom
@@ -66,6 +67,7 @@ impl Default for BpeTrainerBuilder {
                 continuing_subword_prefix: None,
                 end_of_word_suffix: None,
                 max_token_length: None,
+                initial_tokens: vec![],
             },
         }
     }
@@ -139,6 +141,13 @@ impl BpeTrainerBuilder {
         self
     }
 
+    /// Set initial tokens to include in the vocabulary (non-special)
+    #[must_use]
+    pub fn initial_tokens(mut self, tokens: Vec<String>) -> Self {
+        self.config.initial_tokens = tokens;
+        self
+    }
+
     /// Constructs the final BpeTrainer
     pub fn build(self) -> BpeTrainer {
         BpeTrainer {
@@ -151,6 +160,7 @@ impl BpeTrainerBuilder {
             continuing_subword_prefix: self.config.continuing_subword_prefix,
             end_of_word_suffix: self.config.end_of_word_suffix,
             max_token_length: self.config.max_token_length,
+            initial_tokens: self.config.initial_tokens,
             words: HashMap::new(),
         }
     }
@@ -194,6 +204,8 @@ pub struct BpeTrainer {
     pub end_of_word_suffix: Option<String>,
     /// An optional parameter to limit the max length of any single token
     pub max_token_length: Option<usize>,
+    /// A list of initial tokens (non-special) that the model should include in its vocabulary
+    pub initial_tokens: Vec<String>,
 
     words: HashMap<String, u64>,
 }
@@ -256,6 +268,16 @@ impl BpeTrainer {
             if !w2id.contains_key(&token.content) {
                 id2w.push(token.content.to_owned());
                 w2id.insert(token.content.to_owned(), (id2w.len() - 1) as u32);
+            }
+        }
+    }
+
+    /// Add the provided initial tokens to the vocabulary
+    fn add_initial_tokens(&self, w2id: &mut HashMap<String, u32>, id2w: &mut Vec<String>) {
+        for token in &self.initial_tokens {
+            if !w2id.contains_key(token) {
+                id2w.push(token.to_owned());
+                w2id.insert(token.to_owned(), (id2w.len() - 1) as u32);
             }
         }
     }
@@ -446,12 +468,17 @@ impl BpeTrainer {
         self.add_special_tokens(&mut word_to_id, &mut id_to_word);
 
         //
-        // 2. Compute the initial alphabet
+        // 2. Add initial tokens to the vocabulary
+        //
+        self.add_initial_tokens(&mut word_to_id, &mut id_to_word);
+
+        //
+        // 3. Compute the initial alphabet
         //
         self.compute_alphabet(word_counts, &mut word_to_id, &mut id_to_word);
 
         //
-        // 3. Tokenize words
+        // 4. Tokenize words
         //
         self.update_progress(&progress, word_counts.len(), "Tokenize words");
         let (mut words, counts) =
@@ -750,6 +777,52 @@ mod tests {
         .cloned()
         .collect();
         assert_eq!(model.merges, expected_merges);
+    }
+
+    #[test]
+    fn test_train_with_initial_tokens() {
+        let word_counts: HashMap<String, u64> = [
+            ("roses".into(), 1),
+            ("are".into(), 2),
+            ("red".into(), 1),
+            ("blue".into(), 1),
+        ]
+        .iter()
+        .cloned()
+        .collect();
+
+        // Create a trainer with initial tokens that don't appear in our corpus
+        let trainer = BpeTrainer::builder()
+            .show_progress(false)
+            .min_frequency(2)
+            .initial_tokens(vec![
+                "hello".to_string(),
+                "world".to_string(),
+                "tokenizer".to_string(),
+            ])
+            .build();
+
+        let mut model = BPE::default();
+        trainer.do_train(&word_counts, &mut model).unwrap();
+
+        // Verify that our initial tokens are in the vocabulary
+        assert!(model.vocab.contains_key("hello"));
+        assert!(model.vocab.contains_key("world"));
+        assert!(model.vocab.contains_key("tokenizer"));
+
+        // Verify that the initial tokens have the expected IDs (should be at the start after the alphabet)
+        let initial_token_ids: Vec<u32> = model
+            .vocab
+            .iter()
+            .filter(|(k, _)| *k == "hello" || *k == "world" || *k == "tokenizer")
+            .map(|(_, v)| *v)
+            .collect();
+
+        // Make sure we can find our initial_tokens in the vocabulary
+        assert_eq!(initial_token_ids.len(), 3);
+
+        // Check that normal training occurred as well
+        assert!(model.vocab.contains_key("are"));
     }
     #[test]
     fn bpe_test_max_token_length_16() {
