@@ -543,6 +543,11 @@ impl BpeTrainer {
                     part_b = part_b[prefix_byte_len..].to_string();
                 }
             }
+            if part_b == "Ġ" && !part_a.chars().all(|c| c == 'Ġ') {
+                // Hack for SuperBPE - don't do tokens that are just token+space
+                // (but allow merging whitespace with other whitespace)
+                continue;
+            }
             let new_token = format!("{part_a}{part_b}");
             // implement sentencepiece-like merge.
             // if this code were to be merged, integrate a way in the python bindings to communicate this variable
