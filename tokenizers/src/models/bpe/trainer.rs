@@ -508,6 +508,9 @@ impl BpeTrainer {
         // 5. Do merges
         //
         self.update_progress(&progress, self.vocab_size, "Compute merges");
+        if let Some(p) = &progress {
+            p.set_position(word_to_id.len() as u64);
+        }
         let mut merges: Vec<(Pair, u32)> = vec![];
         loop {
             // Stop as soon as we have a big enough vocabulary
@@ -553,6 +556,10 @@ impl BpeTrainer {
             if !word_to_id.contains_key(&new_token) {
                 id_to_word.push(new_token.clone());
                 word_to_id.insert(new_token.clone(), new_token_id);
+
+                if let Some(p) = &progress {
+                    p.inc(1);
+                }
             }
             merges.push((top.pair, new_token_id));
 
@@ -620,12 +627,8 @@ impl BpeTrainer {
                     });
                 }
             });
-
-            if let Some(p) = &progress {
-                p.inc(1);
-            }
         }
-        self.finalize_progress(&progress, merges.len());
+        self.finalize_progress(&progress, word_to_id.len());
 
         // Transfer new vocab & options to model
         model.vocab = word_to_id;
@@ -786,6 +789,8 @@ mod tests {
             ("are".into(), 2),
             ("red".into(), 1),
             ("blue".into(), 1),
+            ("hamburger".into(), 2),
+            ("is".into(), 2),
         ]
         .iter()
         .cloned()
@@ -823,6 +828,8 @@ mod tests {
 
         // Check that normal training occurred as well
         assert!(model.vocab.contains_key("are"));
+        assert!(model.vocab.contains_key("hamburger"));
+        assert!(model.vocab.contains_key("is"));
     }
     #[test]
     fn bpe_test_max_token_length_16() {
